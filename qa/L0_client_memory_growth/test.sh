@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -53,6 +53,22 @@ SERVER=/opt/tritonserver/bin/tritonserver
 SERVER_ARGS="--model-repository=$DATADIR"
 source ../common/util.sh
 
+# Set the number of repetitions in nightly and weekly tests
+# Set the email subject for nightly and weekly tests
+if [ "$TRITON_PERF_WEEKLY" == 1 ]; then
+    # Run the test for each case approximately 1.5 hours
+    # All tests are run cumulatively for 7 hours
+    REPETITION_HTTP_CPP=1300000
+    REPETITION_HTTP_PY=2100000
+    REPETITION_GRPC_CPP=10000000
+    REPETITION_GRPC_PY=1500000
+    EMAIL_SUBJECT="Weekly"
+else
+    REPETITION_CPP=100000
+    REPETITION_PY=10000
+    EMAIL_SUBJECT="Nightly"
+fi
+
 mkdir -p $DATADIR/custom_identity_int32/1
 
 RET=0
@@ -66,6 +82,16 @@ for PROTOCOL in http grpc; do
         MASSIF_LOG="./${PROTOCOL}.${LANG}.massif"
         LEAKCHECK_ARGS="$LEAKCHECK_ARGS_BASE --log-file=$LEAKCHECK_LOG --massif-out-file=$MASSIF_LOG"
 
+        if [ "$TRITON_PERF_WEEKLY" == 1 ]; then
+            if [ $PROTOCOL ==  http ]; then
+                REPETITION_CPP=$REPETITION_HTTP_CPP
+                REPETITION_PY=$REPETITION_HTTP_PY
+            else
+                REPETITION_CPP=$REPETITION_GRPC_CPP
+                REPETITION_PY=$REPETITION_GRPC_PY
+            fi
+        fi 
+        
         run_server
         if [ "$SERVER_PID" == "0" ]; then
             echo -e "\n***\n*** Failed to start $SERVER\n***"
@@ -77,14 +103,16 @@ for PROTOCOL in http grpc; do
         if [ "$LANG" == "c++" ]; then
             MEMORY_GROWTH_TEST=$MEMORY_GROWTH_TEST_CPP
             MAX_ALLOWED_ALLOC="10"
-            EXTRA_ARGS="-r 100000 -i ${PROTOCOL}"
+            EXTRA_ARGS="-r ${REPETITION_CPP} -i ${PROTOCOL}"
         else
             MEMORY_GROWTH_TEST="python $MEMORY_GROWTH_TEST_PY"
             MAX_ALLOWED_ALLOC="1"
-            EXTRA_ARGS="-r 10000 -i ${PROTOCOL}"
+            EXTRA_ARGS="-r ${REPETITION_PY} -i ${PROTOCOL}"
         fi
 
+        SECONDS=0
         $LEAKCHECK $LEAKCHECK_ARGS $MEMORY_GROWTH_TEST $EXTRA_ARGS >> ${CLIENT_LOG} 2>&1
+        TEST_DURATION=$SECONDS
         if [ $? -ne 0 ]; then
             cat ${CLIENT_LOG}
             RET=1
@@ -104,7 +132,11 @@ for PROTOCOL in http grpc; do
                 RET=1
             fi
 
-            # Log the graph for memory growth and the change between Average and Max memory usage
+            # Log test duration, the graph for memory growth and the change between Average and Max memory usage
+            hrs=$(printf "%02d" $((TEST_DURATION / 3600)))
+            mins=$(printf "%02d" $(((TEST_DURATION / 60) % 60)))
+            secs=$(printf "%02d" $((TEST_DURATION % 60)))
+            echo -e "Test Duration: $hrs:$mins:$secs (HH:MM:SS)" >> ${GRAPH_LOG}
             cat ${CLIENT_LOG}.massif
             ms_print ${MASSIF_LOG} | head -n35 >> ${GRAPH_LOG}
             cat ${GRAPH_LOG}
@@ -125,7 +157,7 @@ fi
 
 # Run only if both TRITON_FROM and TRITON_TO_DL are set
 if [[ ! -z "$TRITON_FROM" ]] || [[ ! -z "$TRITON_TO_DL" ]]; then
-    python client_memory_mail.py
+    python client_memory_mail.py $EMAIL_SUBJECT
 fi
 
 exit $RET

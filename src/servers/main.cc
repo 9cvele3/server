@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright 2018-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -85,10 +85,12 @@ int32_t http_port_ = 8000;
 
 #ifdef TRITON_ENABLE_SAGEMAKER
 std::unique_ptr<nvidia::inferenceserver::HTTPServer> sagemaker_service_;
-bool allow_sagemaker_ = true;
+bool allow_sagemaker_ = false;
 int32_t sagemaker_port_ = 8080;
 bool sagemaker_safe_range_set_ = false;
 std::pair<int32_t, int32_t> sagemaker_safe_range_ = {0, 0};
+// The number of threads to initialize for the SageMaker HTTP front-end.
+int sagemaker_thread_cnt_ = 8;
 #endif  // TRITON_ENABLE_SAGEMAKER
 
 #ifdef TRITON_ENABLE_GRPC
@@ -99,6 +101,8 @@ bool grpc_use_ssl_ = false;
 nvidia::inferenceserver::SslOptions grpc_ssl_options_;
 grpc_compression_level grpc_response_compression_level_ =
     GRPC_COMPRESS_LEVEL_NONE;
+// KeepAlive defaults: https://grpc.github.io/grpc/cpp/md_doc_keepalive.html
+nvidia::inferenceserver::KeepAliveOptions grpc_keepalive_options_;
 #endif  // TRITON_ENABLE_GRPC
 
 #ifdef TRITON_ENABLE_METRICS
@@ -126,12 +130,6 @@ int grpc_infer_allocation_pool_size_ = 8;
 // The number of threads to initialize for the HTTP front-end.
 int http_thread_cnt_ = 8;
 #endif  // TRITON_ENABLE_HTTP
-
-
-#if defined(TRITON_ENABLE_SAGEMAKER)
-// The number of threads to initialize for the HTTP front-end.
-int sagemaker_thread_cnt_ = 8;
-#endif  // TRITON_ENABLE_SAGEMAKER
 
 #ifdef _WIN32
 // Minimum implementation of <getopt.h> for Windows
@@ -226,6 +224,12 @@ enum OptionId {
   OPTION_GRPC_SERVER_KEY,
   OPTION_GRPC_ROOT_CERT,
   OPTION_GRPC_RESPONSE_COMPRESSION_LEVEL,
+  OPTION_GRPC_ARG_KEEPALIVE_TIME_MS,
+  OPTION_GRPC_ARG_KEEPALIVE_TIMEOUT_MS,
+  OPTION_GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS,
+  OPTION_GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA,
+  OPTION_GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS,
+  OPTION_GRPC_ARG_HTTP2_MAX_PING_STRIKES,
 #endif  // TRITON_ENABLE_GRPC
 #if defined(TRITON_ENABLE_SAGEMAKER)
   OPTION_ALLOW_SAGEMAKER,
@@ -246,6 +250,8 @@ enum OptionId {
   OPTION_MODEL_CONTROL_MODE,
   OPTION_POLL_REPO_SECS,
   OPTION_STARTUP_MODEL,
+  OPTION_RATE_LIMIT,
+  OPTION_RATE_LIMIT_RESOURCE,
   OPTION_PINNED_MEMORY_POOL_BYTE_SIZE,
   OPTION_CUDA_MEMORY_POOL_BYTE_SIZE,
   OPTION_MIN_SUPPORTED_COMPUTE_CAPABILITY,
@@ -355,18 +361,51 @@ std::vector<Option> options_
        "The compression level to be used while returning the infer response to "
        "the peer. Allowed values are none, low, medium and high. By default, "
        "compression level is selected as none."},
+      {OPTION_GRPC_ARG_KEEPALIVE_TIME_MS, "grpc-keepalive-time", Option::ArgInt,
+       "The period (in milliseconds) after which a keepalive ping is sent on "
+       "the transport. Default is 7200000 (2 hours)."},
+      {OPTION_GRPC_ARG_KEEPALIVE_TIMEOUT_MS, "grpc-keepalive-timeout",
+       Option::ArgInt,
+       "The period (in milliseconds) the sender of the keepalive ping waits "
+       "for an acknowledgement. If it does not receive an acknowledgment "
+       "within this time, it will close the connection. "
+       "Default is 20000 (20 seconds)."},
+      {OPTION_GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS,
+       "grpc-keepalive-permit-without-calls", Option::ArgBool,
+       "Allows keepalive pings to be sent even if there are no calls in flight "
+       "(0 : false; 1 : true). Default is 0 (false)."},
+      {OPTION_GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA,
+       "grpc-http2-max-pings-without-data", Option::ArgInt,
+       "The maximum number of pings that can be sent when there is no "
+       "data/header frame to be sent. gRPC Core will not continue sending "
+       "pings if we run over the limit. Setting it to 0 allows sending pings "
+       "without such a restriction. Default is 2."},
+      {OPTION_GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS,
+       "grpc-http2-min-recv-ping-interval-without-data", Option::ArgInt,
+       "If there are no data/header frames being sent on the transport, this "
+       "channel argument on the server side controls the minimum time "
+       "(in milliseconds) that gRPC Core would expect between receiving "
+       "successive pings. If the time between successive pings is less than "
+       "this time, then the ping will be considered a bad ping from the peer. "
+       "Such a ping counts as a ‘ping strike’. Default is 300000 (5 minutes)."},
+      {OPTION_GRPC_ARG_HTTP2_MAX_PING_STRIKES, "grpc-http2-max-ping-strikes",
+       Option::ArgInt,
+       "Maximum number of bad pings that the server will tolerate before "
+       "sending an HTTP2 GOAWAY frame and closing the transport. Setting it to "
+       "0 allows the server to accept any number of bad pings. Default is 2."},
 #endif  // TRITON_ENABLE_GRPC
 #if defined(TRITON_ENABLE_SAGEMAKER)
       {OPTION_ALLOW_SAGEMAKER, "allow-sagemaker", Option::ArgBool,
-       "Allow the server to listen for Sagemaker requests."},
+       "Allow the server to listen for Sagemaker requests. Default is false."},
       {OPTION_SAGEMAKER_PORT, "sagemaker-port", Option::ArgInt,
-       "The port for the server to listen on for Sagemaker requests."},
+       "The port for the server to listen on for Sagemaker requests. Default "
+       "is 8080."},
       {OPTION_SAGEMAKER_SAFE_PORT_RANGE, "sagemaker-safe-port-range",
        "<integer>-<integer>",
        "Set the allowed port range for endpoints other than the SageMaker "
        "endpoints."},
       {OPTION_SAGEMAKER_THREAD_COUNT, "sagemaker-thread-count", Option::ArgInt,
-       "Number of threads handling Sagemaker requests."},
+       "Number of threads handling Sagemaker requests. Default is 8."},
 #endif  // TRITON_ENABLE_SAGEMAKER
 #ifdef TRITON_ENABLE_METRICS
       {OPTION_ALLOW_METRICS, "allow-metrics", Option::ArgBool,
@@ -405,6 +444,28 @@ std::vector<Option> options_
        "Name of the model to be loaded on server startup. It may be specified "
        "multiple times to add multiple models. Note that this option will only "
        "take affect if --model-control-mode=explicit is true."},
+      // FIXME:  fix the default to execution_count once RL logic is complete.
+      {OPTION_RATE_LIMIT, "rate-limit", Option::ArgStr,
+       "Specify the mode for rate limiting. Options are \"execution_count\" "
+       "and \"off\". The default is \"off\". For "
+       "\"execution_count\", the server will determine the instance using "
+       "configured priority and the number of time the instance has been "
+       "used to run inference. The inference will finally be executed once "
+       "the required resources are available. For \"off\", the server will "
+       "ignore any rate limiter config and run inference as soon as an "
+       "instance is ready."},
+      {OPTION_RATE_LIMIT_RESOURCE, "rate-limit-resource",
+       "<string>:<integer>:<integer>",
+       "The number of resources available to the server. The format of this "
+       "flag is --rate-limit-resource=<resource_name>:<count>:<device>. The "
+       "<device> is optional and if not listed will be applied to every "
+       "device. If the resource is specified as \"GLOBAL\" in the model "
+       "configuration the resource is considered shared among all the devices "
+       "in the system. The <device> property is ignored for such resources. "
+       "This flag can be specified multiple times to specify each resources "
+       "and their availability. By default, the max across all instances that "
+       "list the resource is selected as its availability. The values for this "
+       "flag is case-insensitive."},
       {OPTION_PINNED_MEMORY_POOL_BYTE_SIZE, "pinned-memory-pool-byte-size",
        Option::ArgInt,
        "The total byte size that can be allocated as pinned system memory. "
@@ -559,7 +620,7 @@ StartGrpcService(
   TRITONSERVER_Error* err = nvidia::inferenceserver::GRPCServer::Create(
       server, trace_manager, shm_manager, grpc_port_, grpc_use_ssl_,
       grpc_ssl_options_, grpc_infer_allocation_pool_size_,
-      grpc_response_compression_level_, service);
+      grpc_response_compression_level_, grpc_keepalive_options_, service);
   if (err == nullptr) {
     err = (*service)->Start();
   }
@@ -942,6 +1003,45 @@ ParseTraceLevelOption(std::string arg)
 }
 #endif  // TRITON_ENABLE_TRACING
 
+std::tuple<std::string, int, int>
+ParseRateLimiterResourceOption(const std::string arg)
+{
+  std::string error_string(
+      "--rate-limit-resource option format is "
+      "'<resource_name>:<count>:<device>' or '<resource_name>:<count>'. Got " +
+      arg);
+
+  std::string name_string("");
+  int count = -1;
+  int device_id = -1;
+
+  size_t delim_first = arg.find(":");
+  size_t delim_second = arg.find(":", delim_first + 1);
+
+  if (delim_second != std::string::npos) {
+    // Handle format `<resource_name>:<count>:<device>'
+    size_t delim_third = arg.find(":", delim_second + 1);
+    if (delim_third != std::string::npos) {
+      std::cerr << error_string << std::endl;
+      exit(1);
+    }
+    name_string = arg.substr(0, delim_first);
+    count = ParseIntOption(
+        arg.substr(delim_first + 1, delim_second - delim_first - 1));
+    device_id = ParseIntOption(arg.substr(delim_second + 1));
+  } else if (delim_first != std::string::npos) {
+    // Handle format `<resource_name>:<count>'
+    name_string = arg.substr(0, delim_first);
+    count = ParseIntOption(arg.substr(delim_first + 1));
+  } else {
+    // If no colons found
+    std::cerr << error_string << std::endl;
+    exit(1);
+  }
+
+  return {name_string, count, device_id};
+}
+
 std::tuple<std::string, std::string, std::string>
 ParseBackendConfigOption(const std::string arg)
 {
@@ -1061,7 +1161,7 @@ Parse(TRITONSERVER_ServerOptions** server_options, int argc, char** argv)
   int32_t grpc_port = grpc_port_;
   int32_t grpc_use_ssl = grpc_use_ssl_;
   int32_t grpc_infer_allocation_pool_size = grpc_infer_allocation_pool_size_;
-  grpc_compression_level grpc_response_comression_level =
+  grpc_compression_level grpc_response_compression_level =
       grpc_response_compression_level_;
 #endif  // TRITON_ENABLE_GRPC
 
@@ -1085,6 +1185,13 @@ Parse(TRITONSERVER_ServerOptions** server_options, int argc, char** argv)
 
   TRITONSERVER_ModelControlMode control_mode = TRITONSERVER_MODEL_CONTROL_NONE;
   std::set<std::string> startup_models_;
+
+  // FIXME: Once the rate limiter implementation is complete make
+  // EXEC_COUNT the default.
+  // TRITONSERVER_RateLimitMode rate_limit_mode =
+  //    TRITONSERVER_RATE_LIMIT_EXEC_COUNT;
+  TRITONSERVER_RateLimitMode rate_limit_mode = TRITONSERVER_RATE_LIMIT_OFF;
+  std::vector<std::tuple<std::string, int, int>> rate_limit_resources;
 
 #ifdef TRITON_ENABLE_LOGGING
   bool log_info = true;
@@ -1197,13 +1304,13 @@ Parse(TRITONSERVER_ServerOptions** server_options, int argc, char** argv)
         std::transform(
             mode_str.begin(), mode_str.end(), mode_str.begin(), ::tolower);
         if (mode_str == "none") {
-          grpc_response_comression_level = GRPC_COMPRESS_LEVEL_NONE;
+          grpc_response_compression_level = GRPC_COMPRESS_LEVEL_NONE;
         } else if (mode_str == "low") {
-          grpc_response_comression_level = GRPC_COMPRESS_LEVEL_LOW;
+          grpc_response_compression_level = GRPC_COMPRESS_LEVEL_LOW;
         } else if (mode_str == "medium") {
-          grpc_response_comression_level = GRPC_COMPRESS_LEVEL_MED;
+          grpc_response_compression_level = GRPC_COMPRESS_LEVEL_MED;
         } else if (mode_str == "high") {
-          grpc_response_comression_level = GRPC_COMPRESS_LEVEL_HIGH;
+          grpc_response_compression_level = GRPC_COMPRESS_LEVEL_HIGH;
         } else {
           std::cerr
               << "invalid argument for --grpc_infer_response_compression_level"
@@ -1213,6 +1320,27 @@ Parse(TRITONSERVER_ServerOptions** server_options, int argc, char** argv)
         }
         break;
       }
+      case OPTION_GRPC_ARG_KEEPALIVE_TIME_MS:
+        grpc_keepalive_options_.keepalive_time_ms = ParseIntOption(optarg);
+        break;
+      case OPTION_GRPC_ARG_KEEPALIVE_TIMEOUT_MS:
+        grpc_keepalive_options_.keepalive_timeout_ms = ParseIntOption(optarg);
+        break;
+      case OPTION_GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS:
+        grpc_keepalive_options_.keepalive_permit_without_calls =
+            ParseBoolOption(optarg);
+        break;
+      case OPTION_GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA:
+        grpc_keepalive_options_.http2_max_pings_without_data =
+            ParseIntOption(optarg);
+        break;
+      case OPTION_GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS:
+        grpc_keepalive_options_.http2_min_recv_ping_interval_without_data_ms =
+            ParseIntOption(optarg);
+        break;
+      case OPTION_GRPC_ARG_HTTP2_MAX_PING_STRIKES:
+        grpc_keepalive_options_.http2_max_ping_strikes = ParseIntOption(optarg);
+        break;
 #endif  // TRITON_ENABLE_GRPC
 
 #ifdef TRITON_ENABLE_METRICS
@@ -1259,6 +1387,40 @@ Parse(TRITONSERVER_ServerOptions** server_options, int argc, char** argv)
           std::cerr << "invalid argument for --model-control-mode" << std::endl;
           std::cerr << Usage() << std::endl;
           return false;
+        }
+        break;
+      }
+      case OPTION_RATE_LIMIT: {
+        std::string rate_limit_str(optarg);
+        std::transform(
+            rate_limit_str.begin(), rate_limit_str.end(),
+            rate_limit_str.begin(), ::tolower);
+        if (rate_limit_str == "execution_count") {
+          rate_limit_mode = TRITONSERVER_RATE_LIMIT_EXEC_COUNT;
+        } else if (rate_limit_str == "off") {
+          rate_limit_mode = TRITONSERVER_RATE_LIMIT_OFF;
+        } else {
+          std::cerr << "invalid argument for --rate-limit" << std::endl;
+          std::cerr << Usage() << std::endl;
+          return false;
+        }
+        break;
+      }
+      case OPTION_RATE_LIMIT_RESOURCE: {
+        std::string rate_limit_resource_str(optarg);
+        std::transform(
+            rate_limit_resource_str.begin(), rate_limit_resource_str.end(),
+            rate_limit_resource_str.begin(), ::tolower);
+        try {
+          rate_limit_resources.push_back(
+              ParseRateLimiterResourceOption(optarg));
+        }
+        catch (const std::invalid_argument& ia) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INVALID_ARG,
+              (std::string("failed to parse '") + optarg +
+               "' as <str>:<int>:<int>")
+                  .c_str());
         }
         break;
       }
@@ -1329,7 +1491,7 @@ Parse(TRITONSERVER_ServerOptions** server_options, int argc, char** argv)
   grpc_port_ = grpc_port;
   grpc_infer_allocation_pool_size_ = grpc_infer_allocation_pool_size;
   grpc_use_ssl_ = grpc_use_ssl;
-  grpc_response_compression_level_ = grpc_response_comression_level;
+  grpc_response_compression_level_ = grpc_response_compression_level;
 #endif  // TRITON_ENABLE_GRPC
 
 #ifdef TRITON_ENABLE_METRICS
@@ -1367,6 +1529,16 @@ Parse(TRITONSERVER_ServerOptions** server_options, int argc, char** argv)
     FAIL_IF_ERR(
         TRITONSERVER_ServerOptionsSetStartupModel(loptions, model.c_str()),
         "setting startup model");
+  }
+  FAIL_IF_ERR(
+      TRITONSERVER_ServerOptionsSetRateLimiterMode(loptions, rate_limit_mode),
+      "setting rate limiter configuration");
+  for (const auto& resource : rate_limit_resources) {
+    FAIL_IF_ERR(
+        TRITONSERVER_ServerOptionsAddRateLimiterResource(
+            loptions, std::get<0>(resource).c_str(), std::get<1>(resource),
+            std::get<2>(resource)),
+        "setting rate limiter resource");
   }
   FAIL_IF_ERR(
       TRITONSERVER_ServerOptionsSetPinnedMemoryPoolByteSize(

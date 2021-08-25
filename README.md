@@ -30,6 +30,12 @@
 
 # Triton Inference Server
 
+**LATEST RELEASE: You are currently on the main branch which tracks
+under-development progress towards the next release. The latest
+release of the Triton Inference Server is 2.12.0 and is available on
+branch
+[r21.07](https://github.com/triton-inference-server/server/tree/r21.07).**
+
 Triton Inference Server provides a cloud and edge inferencing solution
 optimized for both CPUs and GPUs. Triton supports an HTTP/REST and
 GRPC protocol that allows remote clients to request inferencing for
@@ -38,22 +44,12 @@ available as a shared library with a C API that allows the full
 functionality of Triton to be included directly in an
 application.
 
-## What's New in 2.12.0
+The current release of the Triton Inference Server is 2.12.0 and
+corresponds to the 21.07 release of the tritonserver container on
+[NVIDIA GPU Cloud (NGC)](https://ngc.nvidia.com). The branch for this
+release is
+[r21.07](https://github.com/triton-inference-server/server/tree/r21.07).
 
-* Added support for CPU in RAPIDS FIL Backend.
-
-* Inference requests using the C API are now allowed to provide multiple copies 
-  of an input tensor in different memories. Triton will choose the most 
-  performant copy to use depending on where the inference request is executed.
-
-* For ONNX models using TensorRT acceleration, the tensorrt_accelerator option 
-  in the model configuration can now specify precision and workspace size. 
-  https://github.com/triton-inference-server/server/blob/main/docs/optimization.md#onnx-with-tensorrt-optimization
-
-* Model Analyzer added an offline mode, which prioritizes throughput over 
-  latency for offline inferencing scenarios. A new set of reports and graphs are
-  created to better analyze the offline use case.
-  
 ## Features
 
 * [Multiple deep-learning
@@ -109,6 +105,12 @@ application.
 
 ## Documentation
 
+**The master branch documentation tracks the upcoming,
+under-development release and so may not be accurate for the current
+release of Triton. See the [r21.07
+documentation](https://github.com/triton-inference-server/server/tree/r21.07#documentation)
+for the current release.**
+
 [Triton Architecture](docs/architecture.md) gives a high-level
 overview of the structure and capabilities of the inference
 server. There is also an [FAQ](docs/faq.md). Additional documentation
@@ -141,6 +143,7 @@ describe supported GPUs.
   - [Model Analyzer](docs/model_analyzer.md)
   - [Performance Analyzer](docs/perf_analyzer.md)
 - [Metrics](docs/metrics.md)
+- [Jetson and JetPack](docs/jetson.md)
 
 The [quickstart](docs/quickstart.md) walks you through all the steps
 required to install and run Triton with an example image

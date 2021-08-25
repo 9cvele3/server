@@ -1,5 +1,5 @@
 <!--
-# Copyright (c) 2018-2021, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2018-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -62,9 +62,7 @@ The easiest way to build Triton is to use Docker. The result of the
 build will be a Docker image called *tritonserver* that will contain
 the tritonserver executable in /opt/tritonserver/bin and the required
 shared libraries in /opt/tritonserver/lib. The backends built for
-Triton will be in /opt/tritonserver/backends (note that as of the
-21.07 release the TensorRT backend is still included in the core of
-Triton and so does not appear in /opt/tritonserver/backends).
+Triton will be in /opt/tritonserver/backends.
 
 The first step for any build is to checkout the
 [triton-inference-server/server](https://github.com/triton-inference-server/server)
@@ -95,7 +93,7 @@ and so you must enable them explicitly. The following build.py
 invocation builds all features, backends, and repository agents.
 
 ```
-$ ./build.py --cmake-dir=<path/to/repo>/build --build-dir=/tmp/citritonbuild --enable-logging --enable-stats --enable-tracing --enable-metrics --enable-gpu-metrics --enable-gpu --filesystem=gcs --filesystem=azure_storage --filesystem=s3 --endpoint=http --endpoint=grpc --repo-tag=common:<container tag> --repo-tag=core:<container tag> --repo-tag=backend:<container tag> --repo-tag=thirdparty:<container tag> --backend=ensemble --backend=tensorrt --backend=identity:<container tag> --backend=repeat:<container tag> --backend=square:<container tag> --backend=onnxruntime:<container tag> --backend=pytorch:<container tag> --backend=tensorflow1:<container tag> --backend=tensorflow2:<container tag> --backend=openvino:<container tag> --backend=python:<container tag> --backend=dali:<container tag> --backend=fil:<container tag> --repoagent=checksum:<container tag>
+$ ./build.py --cmake-dir=<path/to/repo>/build --build-dir=/tmp/citritonbuild --enable-logging --enable-stats --enable-tracing --enable-metrics --enable-gpu-metrics --enable-gpu --filesystem=gcs --filesystem=azure_storage --filesystem=s3 --endpoint=http --endpoint=grpc --repo-tag=common:<container tag> --repo-tag=core:<container tag> --repo-tag=backend:<container tag> --repo-tag=thirdparty:<container tag> --backend=ensemble --backend=tensorrt:<container tag> --backend=identity:<container tag> --backend=repeat:<container tag> --backend=square:<container tag> --backend=onnxruntime:<container tag> --backend=pytorch:<container tag> --backend=tensorflow1:<container tag> --backend=tensorflow2:<container tag> --backend=openvino:<container tag> --backend=python:<container tag> --backend=dali:<container tag> --backend=fil:<container tag> --repoagent=checksum:<container tag>
 ```
 
 If you are building on master/main branch then \<container tag\> will
@@ -229,7 +227,7 @@ cuDNN and TensorRT versions and place them in the local directory.
 
 * For cuDNN the CUDNN_VERSION and CUDNN_ZIP arguments indicate the
   version of cuDNN that your should download from
-  https://developer.nvidia.com/rdp/cudnn-archive.
+  https://developer.nvidia.com/rdp/cudnn-download.
 
 * For TensorRT the TENSORRT_VERSION and TENSORRT_ZIP arguments
   indicate the version of TensorRT that your should download from
@@ -252,7 +250,7 @@ and so you must enable them explicitly. The following build.py
 invocation builds all features and backends available on windows.
 
 ```
-$ python build.py --cmake-dir=<path/to/repo>/build --build-dir=/tmp/citritonbuild --no-container-pull --image=base,win10-py3-min --enable-logging --enable-stats --enable-tracing --enable-gpu --endpoint=grpc --repo-tag=common:<container tag> --repo-tag=core:<container tag> --repo-tag=backend:<container tag> --repo-tag=thirdparty:<container tag> --backend=ensemble --backend=tensorrt --backend=onnxruntime:<container tag>
+$ python build.py --cmake-dir=<path/to/repo>/build --build-dir=/tmp/citritonbuild --no-container-pull --image=base,win10-py3-min --enable-logging --enable-stats --enable-tracing --enable-gpu --endpoint=grpc --repo-tag=common:<container tag> --repo-tag=core:<container tag> --repo-tag=backend:<container tag> --repo-tag=thirdparty:<container tag> --backend=ensemble --backend=tensorrt:<container tag> --backend=onnxruntime:<container tag>
 ```
 
 If you are building on master/main branch then \<container tag\> will
@@ -292,7 +290,7 @@ platforms by reading the above documentation and then follow the
 process for the supported platform that most closely matches the
 platform you are interested in (for example, if you are trying to
 build for RHEL/x86-64 then follow the [Building for Ubuntu
-20.04](building-for-ubuntu-2004) process. You will likely need to make
+20.04](#building-for-ubuntu-2004) process. You will likely need to make
 changes in the following areas.
 
 * The build.py script installs dependencies for the build using
@@ -336,3 +334,9 @@ changes in the following areas.
   NGC container. But the build can also use PyTorch shared libraries
   that you build separately for your platform. See the pytorch_backend
   build process for details.
+
+## Building with Debug Symbols
+
+To build with Debug symbols, use the --build-type=Debug arguement while
+launching build.py. You can then launch the built server with gdb and see
+the debug symbols/information in the gdb trace.
